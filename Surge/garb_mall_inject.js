@@ -90,21 +90,40 @@ function scoreArray(path, arr) {
   return s;
 }
 
-function detectStatus(keyVals) {
-  var best = null;
+function detectStatus(keyVals, exclude) {
+  exclude = exclude || [];
+  var named = null, fallback = null;
+
   for (var k in keyVals) {
+    if (exclude.indexOf(k) >= 0) continue;          // ID / 名称 / 封面字段不参与
     var vals = keyVals[k];
     if (!vals || !vals.length) continue;
+
     var uniq = {};
     vals.forEach(function (v) { uniq[String(v)] = (uniq[String(v)] || 0) + 1; });
     var keys = Object.keys(uniq);
-    if (keys.length < 2 || keys.length > 5) continue;
-    var allNumeric = keys.every(function (v) { return /^\d+$/.test(v) || v === 'true' || v === 'false'; });
-    if (!allNumeric) continue;
-    var bonus = /(status|state|sale|shelf|online)/i.test(k) ? 3 : 0;
-    var sc = -keys.length + bonus;
-    if (!best || sc > best.sc) best = { sc: sc, field: k, values: uniq };
+    if (keys.length < 1 || keys.length > 5) continue;
+
+    var numeric = keys.every(function (v) {
+      return /^\d+$/.test(v) || v === 'true' || v === 'false';
+    });
+    if (!numeric) continue;
+
+    // 全表同值也能当状态（比如全场在售），但优先级最低
+    var looksLikeStatus = /(status|state|sale|shelf|online|hide)/i.test(k);
+
+    if (looksLikeStatus) {
+      if (!named || keys.length > Object.keys(named.values).length) {
+        named = { field: k, values: uniq };
+      }
+    } else if (keys.length >= 2) {
+      if (!fallback || keys.length < Object.keys(fallback.values).length) {
+        fallback = { field: k, values: uniq };
+      }
+    }
   }
+
+  var best = named || fallback;
   return best ? { field: best.field, values: best.values } : { field: null, values: {} };
 }
 
@@ -142,7 +161,11 @@ function analyze(obj) {
     });
   });
 
-  var st = detectStatus(keyVals);
+  var idFieldsPre = keyUnion.filter(function (k) { return ID_RE.test(k) || ID_RE_CAMEL.test(k); });
+  var nameFieldsPre = keyUnion.filter(function (k) { return NAME_RE.test(k) || NAME_RE_CAMEL.test(k); });
+  var coverFieldsPre = keyUnion.filter(function (k) { return COVER_RE.test(k); });
+
+  var st = detectStatus(keyVals, idFieldsPre.concat(nameFieldsPre, coverFieldsPre));
 
   var idFields = keyUnion.filter(function (k) { return ID_RE.test(k) || ID_RE_CAMEL.test(k); })
     .sort(function (a, b) {
@@ -248,8 +271,9 @@ function inject(info, items) {
     var img = src.large || src.small || '';
     info.coverFields.forEach(function (f) { if (f in it) it[f] = img; });
 
-    // 状态
-    if (info.statusField && info.statusField in it) {
+    // 状态（绝不能覆盖 ID 字段）
+    if (info.statusField && info.statusField in it
+        && info.idFields.indexOf(info.statusField) < 0) {
       if (FORCE_ONSALE && onSale !== null) {
         it[info.statusField] = /^\d+$/.test(onSale) ? parseInt(onSale, 10) : onSale;
       }

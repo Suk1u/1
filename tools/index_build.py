@@ -168,6 +168,44 @@ def cmd_users(a):
     print("\n访问 %d 个用户，索引共 %d 条" % (seen, len(ix["items"])))
 
 
+# --------------------------------------------------------------- export
+
+def cmd_export(a):
+    """把索引里下架的条目导出成 Surge 模块吃的 catalog.json"""
+    ix = load_index()
+    items = ix["items"]
+    mall = None
+    if os.path.exists(SEEDS):
+        with open(SEEDS, encoding="utf-8") as f:
+            mall = set(json.load(f).get("ids", []))
+
+    out_items = []
+    for v in items.values():
+        if not v.get("suit", True):
+            continue
+        status = "unknown"
+        if mall is not None:
+            status = "onsale" if v["item_id"] in mall else "delisted"
+        out_items.append({
+            "garb_id": v["item_id"],
+            "image_id": v.get("garb_id") or 0,
+            "name": v.get("name") or "",
+            "title": v.get("name") or "",
+            "large": v.get("cover") or "",
+            "small": (v.get("images") or [""])[0] if v.get("images") else v.get("cover") or "",
+            "status": status,
+        })
+
+    out_items.sort(key=lambda x: (x["status"] != "delisted", -x["garb_id"]))
+    out = a.out or os.path.join(ROOT, "Surge", "catalog.json")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump({"generated": time.strftime("%Y-%m-%d %H:%M:%S"),
+                   "items": out_items}, f, ensure_ascii=False, indent=1)
+    n_del = sum(1 for x in out_items if x["status"] == "delisted")
+    print("导出 %d 条（下架 %d）-> %s" % (len(out_items), n_del, out))
+
+
 # ----------------------------------------------------------------- rank
 
 def cmd_rank(a):
@@ -319,8 +357,11 @@ def cmd_stats(a):
     for v in items.values():
         types[v.get("type") or "?"] = types.get(v.get("type") or "?", 0) + 1
     print("索引 %d 条" % len(items))
-    print("已探 id %d 个" % len(set(ix["probed"])))
-    print("已处理种子 %d 个" % len(ix.get("seeds", [])))
+    print("已采用户 %d 个" % len(ix.get("users", [])))
+    print("已探 id %d 个" % len(set(ix.get("probed", []))))
+    print("已处理在售种子 %d 个" % len(ix.get("seeds", [])))
+    suits = sum(1 for v in items.values() if v.get("suit", True))
+    print("其中套装 %d 条，子件 %d 条" % (suits, len(items) - suits))
     if types:
         print("类型分布:", types)
     if items:
@@ -333,6 +374,10 @@ def cmd_stats(a):
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    ex = sub.add_parser("export")
+    ex.add_argument("--out", default="")
+    ex.set_defaults(func=cmd_export)
 
     rk = sub.add_parser("rank")
     rk.add_argument("--vmids", default="", help="候选 vmid，逗号分隔")

@@ -1,0 +1,9 @@
+# 本机 cookie，别提交
+data/buvid.txt
+
+__pycache__/
+*.pyc
+
+# 抓包落盘
+capture/
+preview.json

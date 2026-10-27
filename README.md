@@ -16,20 +16,21 @@
 ## 文件
 
 ```
-Surge/bili-garb-mall.sgmodule   模块本体（装这个）
+Surge/bili-garb-mall.sgmodule   注入模块（装这个）
 Surge/garb_mall_inject.js       注入脚本，运行时自识别列表结构
+Surge/catalog.json              下架装扮库（index_build export 产出）
 Surge/bili-capture.sgmodule     抓包模块（可选）
 Surge/capture_record.js         抓包记录
 Surge/capture_view.js           抓包面板
-Surge/catalog.json              下架装扮库
 mall.html                       本地索引浏览器，带中文名搜索框
-tools/catalog.py                采集 / 校验 / 快照 / 建库 / 滚雪球
-tools/search.py                 本地索引搜索（备选）
-tools/garb_api.py               商城接口客户端（搜索 / 详情 / 我的装扮）
-tools/index_build.py            索引构建（我的装扮 / 在售目录 / id 枚举）
-tools/find.py                   按中文名搜，含下架
-tools/bili.py                   签名 + 接口封装
-data/catalog_db.json            名字索引数据库（harvest 产出）
+
+tools/garb_api.py               接口客户端（商城搜索 / 详情 / 我的装扮）
+tools/index_build.py            索引构建 + 导出
+tools/find.py                   按中文名搜，标注在售/下架
+
+data/garb_index.json            名字索引（主数据）
+data/mall_ids.json              在售目录
+data/seed_vmids.txt             采集种子（装扮收藏大户）
 ```
 
 ---
@@ -45,34 +46,30 @@ https://raw.githubusercontent.com/Suk1u/1/main/Surge/bili-garb-mall.sgmodule
 2. 打开 MITM 并信任证书（`api.bilibili.com` / `app.bilibili.com`）
 3. 重启哔哩哔哩，进装扮商城
 
-装上但没效果是正常的 —— **`catalog.json` 现在是空的**。先按下面「建库」填数据。
+装好后模块会从 `Surge/catalog.json` 拉库，里面现在有 69 条（63 条下架）。想扩充看下面「建库」。
 
 ---
 
 ## 建库
 
-下架装扮不在商城列表里，但还穿在人身上。所以 ID 从用户空间捞。
+下架装扮只在「我的装扮」里。所以索引从已拥有列表采集，不是从商城。
 
 ```bash
-cd tools
+# 1. 拉全量在售目录（用来判定「在售 / 下架」）
+python tools/index_build.py walk-seeds --rounds 30
 
-# 1. 从一个或多个用户的空间拉装扮列表
-python catalog.py seed --vmids 2,3,4,5 --max-pages 3
+# 2. 从种子用户的「我的装扮」采集（含下架）
+python tools/index_build.py users --vmids $(paste -sd, data/seed_vmids.txt) --no-follow
 
-# 2. 对每个 ID 调 detail 补齐素材
-python catalog.py verify --vmid 2
-
-# 3. 抓一次商城列表（判定哪些是「下架」需要参照）
-#    用 Surge 的抓包，或 mitmproxy，把响应存进 capture/ 目录
-#    然后：
-python catalog.py build
+# 3. 导出给 Surge 模块吃的 catalog.json
+python tools/index_build.py export
 ```
 
-`build` 会直接写 `Surge/catalog.json`（在仓库里跑的时候）。提交推送后模块下次刷新就生效，缓存 6 小时。
+`export` 会写 `Surge/catalog.json`，只保留 `status=delisted` 的条目。提交推送后模块下次刷新就生效（缓存 6 小时）。
 
-想写到别处用 `--out <path>`。
+三步跑完一次，索引里就有东西了。之后靠 GitHub Action 定时扩（每 4 小时一次）。
 
-**为什么要抓一次商城**：`detail` 只能证明「这个 ID 有效」，证明不了「它下架了」。必须拿商城在售集合做差集，差集里的才是下架。
+**为什么必须拉在售目录**：`我的装扮` 只告诉你「谁拥有什么」，分不出在售还是下架。拿商城在售集合做差集，差集里的才是下架。
 
 ---
 
