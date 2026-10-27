@@ -47,7 +47,9 @@ python catalog.py verify --vmid 2
 python catalog.py build
 ```
 
-`catalog.py build` 会把 `catalog.json` 写到 `tools/` 下。把它复制到 `Surge/catalog.json` 提交，模块下次刷新就生效（缓存 6 小时）。
+`build` 会直接写 `Surge/catalog.json`（在仓库里跑的时候）。提交推送后模块下次刷新就生效，缓存 6 小时。
+
+想写到别处用 `--out <path>`。
 
 **为什么要抓一次商城**：`detail` 只能证明「这个 ID 有效」，证明不了「它下架了」。必须拿商城在售集合做差集，差集里的才是下架。
 

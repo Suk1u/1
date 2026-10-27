@@ -151,6 +151,12 @@ def walk_numbers(obj, key_names):
             yield from walk_numbers(v, key_names)
 
 
+def default_out():
+    """优先写到仓库的 Surge/catalog.json，没有就写本地"""
+    repo = os.path.join(os.path.dirname(HERE), "Surge", "catalog.json")
+    return repo if os.path.isdir(os.path.dirname(repo)) else os.path.join(HERE, "catalog.json")
+
+
 def cmd_build(a):
     db = load_db()
     on_sale = scan_capture(db)
@@ -161,7 +167,7 @@ def cmd_build(a):
             continue
         it["status"] = "onsale" if it["in_mall"] else "delisted"
     save_db(db)
-    out = os.path.join(HERE, "catalog.json")
+    out = a.out or default_out()
     items = sorted(db["items"].values(), key=lambda x: (x["status"] != "delisted", -x["garb_id"]))
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"generated": time.strftime("%Y-%m-%d %H:%M:%S"), "items": items},
@@ -192,7 +198,8 @@ def main():
     v.add_argument("--sleep", type=float, default=0.8); v.add_argument("--ak", default="")
     v.set_defaults(func=cmd_verify)
 
-    b = sub.add_parser("build"); b.set_defaults(func=cmd_build)
+    b = sub.add_parser("build"); b.add_argument("--out", default="")
+    b.set_defaults(func=cmd_build)
     st = sub.add_parser("stats"); st.set_defaults(func=cmd_stats)
 
     a = ap.parse_args()
