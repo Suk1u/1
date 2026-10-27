@@ -1,0 +1,53 @@
+{
+ "generated": "2026-10-27 20:07:09",
+ "items": [
+  {
+   "garb_id": 39489,
+   "image_id": 39495,
+   "name": "蕾蕾大表哥 主题",
+   "title": "蕾蕾大表哥",
+   "large": "https://i0.hdslb.com/bfs/garb/item/c97dea3a1c2d0c9fa4f38ffb610f51239968b1a2.jpg",
+   "small": "https://i0.hdslb.com/bfs/garb/item/c97dea3a1c2d0c9fa4f38ffb610f51239968b1a2.jpg",
+   "status": "delisted",
+   "kind": "theme",
+   "color_mode": "light",
+   "package_url": "https://i0.hdslb.com/bfs/garb/zip/af915c59e790eb48ddbc82f47ebf8f55e8650c8b.zip"
+  },
+  {
+   "garb_id": 5224,
+   "image_id": 5235,
+   "name": "BML2021 主题",
+   "title": "BML2021",
+   "large": "https://i0.hdslb.com/bfs/garb/item/74cdac0a008dfe2265c78c2b5cae5a8a9beb26b2.jpg",
+   "small": "https://i0.hdslb.com/bfs/garb/item/8bc2d9c9f36d54f5bf7a0988566c3a934d6d9ebf.jpg",
+   "status": "delisted",
+   "kind": "theme",
+   "color_mode": "dark",
+   "package_url": "https://i0.hdslb.com/bfs/garb/zip/7355fde4ec078fc93a6223aaf215f28fd2900eb3.zip"
+  },
+  {
+   "garb_id": 2574,
+   "image_id": 2575,
+   "name": "七海Nana7mi VR 主题",
+   "title": "七海Nana7mi",
+   "large": "https://i0.hdslb.com/bfs/garb/item/13d4aba51d3832b4ad699d68e57491af01f50293.jpg",
+   "small": "https://i0.hdslb.com/bfs/garb/item/13d4aba51d3832b4ad699d68e57491af01f50293.jpg",
+   "status": "delisted",
+   "kind": "theme",
+   "color_mode": "dark",
+   "package_url": "https://i0.hdslb.com/bfs/garb/zip/b004b9cdb48fc509bd4b1ac89b6d215be84ebbce.zip"
+  },
+  {
+   "garb_id": 32264,
+   "image_id": 32296,
+   "name": "EveOneCat2 主题",
+   "title": "EveOneCat2",
+   "large": "https://i0.hdslb.com/bfs/garb/item/af6ab166af22ed45d429bfde4e3962bb78f270c8.png",
+   "small": "https://i0.hdslb.com/bfs/garb/item/af6ab166af22ed45d429bfde4e3962bb78f270c8.png",
+   "status": "onsale",
+   "kind": "theme",
+   "color_mode": "dark",
+   "package_url": "https://i0.hdslb.com/bfs/garb/zip/4f047ea64e0659dcbcf70092dd6e30c1eadb9390.zip"
+  }
+ ]
+}

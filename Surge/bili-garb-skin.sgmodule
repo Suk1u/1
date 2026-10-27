@@ -1,0 +1,19 @@
+#!name=哔哩哔哩 · 装扮商城显示下架皮肤（待填 pattern）
+#!desc=把已下架的皮肤（主题）注入到主题列表里。数据已就绪，只差一个接口 pattern —— 抓一次主题页，把 URL 填进下面第 8 行的 pattern= 即可，脚本不用改。
+#!system=ios
+#!author=Suk1u
+#!homepage=https://github.com/Suk1u/1
+
+[Script]
+# ⚠ 下面这一行的 pattern 需要替换。
+# 步骤：
+#   1. 装 bili-capture.sgmodule，MITM 开着
+#   2. App 里进「我的 → 装扮 → 主题」，或装扮详情页的主题页签
+#   3. Safari 打开 https://api.bilibili.com/__bili_capture，筛 theme / skin
+#   4. 把那条请求的 URL 前缀填进 pattern（注意转义）
+# 示例（未验证，仅示意）：
+#   pattern=^https:\/\/api\.bilibili\.com\/x\/garb\/v1\/theme
+garb-skin-inject = type=http-response,pattern=^https:\/\/api\.bilibili\.com\/x\/garb\/__REPLACE_ME__,requires-body=1,max-size=0,script-path=https://raw.githubusercontent.com/Suk1u/1/main/Surge/garb_mall_inject.js,argument=catalog=https%3A%2F%2Fraw.githubusercontent.com%2FSuk1u%2F1%2Fmain%2FSurge%2Fcatalog-themes.json&suffix=%EF%BC%88%E5%B7%B2%E4%B8%8B%E6%9E%B6%EF%BC%89&force=1
+
+[MITM]
+hostname = %APPEND% api.bilibili.com, app.bilibili.com

@@ -13,12 +13,16 @@
 
 ---
 
+> 完整架构和落地清单见 **`WORKFLOW.md`**。
+
 ## 文件
 
 ```
 Surge/bili-garb-mall.sgmodule   注入模块（装这个）
 Surge/garb_mall_inject.js       注入脚本，运行时自识别列表结构
 Surge/catalog.json              下架装扮库（index_build export 产出）
+Surge/catalog-themes.json       下架皮肤库（export --themes 产出）
+Surge/bili-garb-skin.sgmodule   皮肤注入模块（待填 pattern）
 Surge/bili-capture.sgmodule     抓包模块（可选）
 Surge/capture_record.js         抓包记录
 Surge/capture_view.js           抓包面板

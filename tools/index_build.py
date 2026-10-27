@@ -171,7 +171,10 @@ def cmd_users(a):
 # --------------------------------------------------------------- export
 
 def cmd_export(a):
-    """把索引里下架的条目导出成 Surge 模块吃的 catalog.json"""
+    """把索引里下架的条目导出成 Surge 模块吃的 catalog.json
+
+    --themes 时额外导出一份 catalog-themes.json（皮肤/主题）
+    """
     ix = load_index()
     items = ix["items"]
     mall = None
@@ -204,6 +207,56 @@ def cmd_export(a):
                    "items": out_items}, f, ensure_ascii=False, indent=1)
     n_del = sum(1 for x in out_items if x["status"] == "delisted")
     print("导出 %d 条（下架 %d）-> %s" % (len(out_items), n_del, out))
+
+    if a.themes:
+        export_themes(mall)
+
+
+def export_themes(mall):
+    """把 data/themes.json 导成注入模块能吃的皮肤库
+
+    皮肤（主题）是套装的子件，下架状态跟着套装走。
+    """
+    tpath = os.path.join(DATA, "themes.json")
+    if not os.path.exists(tpath):
+        print("没有 themes.json，先跑 python tools/themes.py build")
+        return
+    with open(tpath, encoding="utf-8") as f:
+        themes = (json.load(f).get("themes") or {})
+
+    ix = load_index()
+    suit_status = {}
+    for v in (ix.get("items") or {}).values():
+        if mall is None:
+            continue
+        suit_status[v["item_id"]] = "onsale" if v["item_id"] in mall else "delisted"
+
+    out_items = []
+    for t in themes.values():
+        p = t.get("props") or {}
+        sid = t.get("suit_item_id")
+        status = suit_status.get(sid, "unknown")
+        out_items.append({
+            "garb_id": t["theme_item_id"],
+            "image_id": sid,
+            "name": "%s 主题" % (t.get("suit_name") or t.get("name") or ""),
+            "title": t.get("name") or "",
+            "large": p.get("image_cover") or p.get("image_preview") or "",
+            "small": p.get("image_preview") or p.get("image_cover") or "",
+            "status": status,
+            "kind": "theme",
+            "color_mode": p.get("color_mode"),
+            "package_url": p.get("package_url"),
+        })
+
+    out_items.sort(key=lambda x: (x["status"] != "delisted", -x["garb_id"]))
+    out = os.path.join(ROOT, "Surge", "catalog-themes.json")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w", encoding="utf-8") as f:
+        json.dump({"generated": time.strftime("%Y-%m-%d %H:%M:%S"),
+                   "items": out_items}, f, ensure_ascii=False, indent=1)
+    nd = sum(1 for x in out_items if x["status"] == "delisted")
+    print("导出皮肤 %d 条（下架 %d）-> %s" % (len(out_items), nd, out))
 
 
 # ----------------------------------------------------------------- rank
@@ -377,6 +430,7 @@ def main():
 
     ex = sub.add_parser("export")
     ex.add_argument("--out", default="")
+    ex.add_argument("--themes", action="store_true", help="额外导出皮肤库")
     ex.set_defaults(func=cmd_export)
 
     rk = sub.add_parser("rank")

@@ -54,7 +54,7 @@ jobs:
         run: python tools/themes.py build --limit 40 --sleep 1.2
 
       - name: 导出 catalog.json
-        run: python tools/index_build.py export
+        run: python tools/index_build.py export --themes
 
       - name: 统计
         run: python tools/index_build.py stats
@@ -63,7 +63,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/garb_index.json data/mall_ids.json data/themes.json data/collections.json Surge/catalog.json 2>/dev/null || true
+          git add data/garb_index.json data/mall_ids.json data/themes.json data/collections.json Surge/catalog.json Surge/catalog-themes.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "没有变化"
           else
