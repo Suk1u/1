@@ -13,6 +13,21 @@
 
 ---
 
+## 文件
+
+```
+Surge/bili-garb-mall.sgmodule   模块本体（装这个）
+Surge/garb_mall_inject.js       注入脚本，运行时自识别列表结构
+Surge/catalog.json              下架装扮库
+mall.html                       本地索引浏览器，带中文名搜索框
+tools/catalog.py                采集 / 校验 / 快照 / 建库 / 滚雪球
+tools/search.py                 按中文名反查 ID
+tools/bili.py                   签名 + 接口封装
+data/catalog_db.json            名字索引数据库（harvest 产出）
+```
+
+---
+
 ## 安装
 
 1. Surge → 首页 → 模块 → 安装新模块，填：
@@ -52,6 +67,65 @@ python catalog.py build
 想写到别处用 `--out <path>`。
 
 **为什么要抓一次商城**：`detail` 只能证明「这个 ID 有效」，证明不了「它下架了」。必须拿商城在售集合做差集，差集里的才是下架。
+
+---
+
+## 按中文名反查 ID
+
+**B站 没有服务端的装扮名字检索。** 包里所有 search 接口（`x/v2/search/*`、`x/emote/package/search`）都不索引装扮商城，`x/emote/package/search` 只搜表情包。所以「知道名字查 ID」只能靠本地索引。
+
+### 建索引
+
+索引来自**别人身上穿着的装扮** —— `x/v2/space/garb/list` 会返回 `garbTitle`（装扮名）+ `garbId`。
+
+```bash
+cd tools
+
+# 从一个种子用户出发，顺着关注链滚雪球
+python catalog.py harvest --seed 2 --max-users 500
+
+# 想扩更大就加大上限，断了可以 --resume 接着跑
+python catalog.py harvest --seed 2 --max-users 5000 --resume
+```
+
+每访问一个用户，就把他的装扮名字和 ID 收进 `data/catalog_db.json`。500 个用户大概能覆盖几百到上千套装扮，看运气。
+
+### 查
+
+```bash
+python search.py 夏日
+python search.py 夏日 --status delisted     # 只要下架的
+python search.py --id 12345                 # 按 ID 反查
+python search.py --list --limit 50          # 列出全部
+```
+
+输出：
+
+```
+garb_id  image_id status     标题                           素材
+----------------------------------------------------------------
+200001   11       delisted   夏日限定·薄荷                      有
+200002   12       delisted   夏日限定·柠檬                      有
+```
+
+拿到 `garb_id` + `image_id` 就能直接调 `x/v2/space/garb/detail` 取素材，或者喂给 `catalog.json`。
+
+### 网页版
+
+`mall.html` 也能直接开，顶部有搜索框，按中文名模糊匹配（忽略空格和标点）。本地起个服务：
+
+```bash
+python -m http.server 8000
+# 打开 http://localhost:8000/mall.html
+```
+
+### 索引查不到怎么办
+
+说明没人穿着它，或者你的采集没覆盖到。三个补法：
+
+1. **加大采集**：`--max-users` 拉到几千，或换不同圈子的种子用户（不同分区的人穿不同装扮）
+2. **主站搜**：B站 搜「装扮名 + 装扮」，看开箱视频/动态，分享链接里带 `item_id`
+3. **抓商城**：Surge 开着，进装扮商城随便翻，`capture` 模式下响应会存下来，里面的 `item_id` + `name` 也能入库
 
 ---
 
