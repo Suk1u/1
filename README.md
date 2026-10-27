@@ -27,10 +27,12 @@ mall.html                       本地索引浏览器，带中文名搜索框
 tools/garb_api.py               接口客户端（商城搜索 / 详情 / 我的装扮）
 tools/index_build.py            索引构建 + 导出
 tools/find.py                   按中文名搜，标注在售/下架
+tools/themes.py                 提取装扮里的主题部件
 
 data/garb_index.json            名字索引（主数据）
 data/mall_ids.json              在售目录
 data/seed_vmids.txt             采集种子（装扮收藏大户）
+data/themes.json                主题部件（配色 + 包地址）
 ```
 
 ---
@@ -176,6 +178,63 @@ python tools/garb_api.py detail 120730201
 ### 速率
 
 B站 WAF 对高频敏感，连打两百多次会开始返回 412，要等冷却。工具默认 1.2 秒一次 + 指数退避。
+
+---
+
+## 主题装扮
+
+**「主题」不是独立商品，是套装里的一个部件。**
+
+每个套装在 `suit_items` 下挂 9 类部件，其中 `skin` 就是主题：
+
+```
+suit_items:
+   card / card_bg / emoji_package / pendant / skin / space_bg / thumbup / loading / play_icon
+                                    ↑
+                                  主题在这
+```
+
+取法：
+
+```bash
+python tools/themes.py build      # 遍历索引，抽出每个套装的 skin
+python tools/themes.py list       # 列出
+python tools/themes.py show 5224  # 看完整配置
+python tools/themes.py pack 5224  # 只打印 zip 地址
+```
+
+```
+theme_id     套装           名称                     mode     包
+----------------------------------------------------------------------------------
+39489        39495        蕾蕾大表哥                  light    有
+32264        32296        EveOneCat2             dark     有
+5224         5235         BML2021                dark     有
+2574         2575         七海Nana7mi              dark     有
+```
+
+### 一个主题里有什么
+
+`GET /x/garb/v2/mall/suit/detail?item_id=<theme_id>` 返回 37 个字段：
+
+```
+color                #ffffff          主色
+color_mode           dark             亮/暗
+color_second_page    #454078          二级页配色
+head_bg / head_tab_bg / side_bg / tail_bg      各区块背景图
+tail_icon_*          10 个图标（普通/选中 × main/myself/dynamic/channel/shop）
+image_cover / image_preview                    封面和预览
+package_url          .../garb/zip/xxx.zip      ★ 主题包
+package_md5          041cb8b5...
+ver                  1622174043
+```
+
+`package_url` 实测可下：`application/zip`，879 KB，公开无鉴权。
+
+也就是说**拿到 theme_id 就等于拿到整套主题资源**——配色、背景、图标、包。
+
+### 下架套装的主题还在吗
+
+在。主题是套装的子件，走同一个 `suit/detail`，不查上架状态。BML2021 这套已经下架，主题 5224 照样能查、包照样能下。
 
 ---
 
