@@ -24,7 +24,8 @@ Surge/capture_view.js           抓包面板
 Surge/catalog.json              下架装扮库
 mall.html                       本地索引浏览器，带中文名搜索框
 tools/catalog.py                采集 / 校验 / 快照 / 建库 / 滚雪球
-tools/search.py                 按中文名反查 ID
+tools/search.py                 本地索引搜索（备选）
+tools/garb_api.py               商城接口客户端（搜索 / 详情 / 遍历 / 枚举）
 tools/bili.py                   签名 + 接口封装
 data/catalog_db.json            名字索引数据库（harvest 产出）
 ```
@@ -75,60 +76,88 @@ python catalog.py build
 
 ## 按中文名反查 ID
 
-**B站 没有服务端的装扮名字检索。** 包里所有 search 接口（`x/v2/search/*`、`x/emote/package/search`）都不索引装扮商城，`x/emote/package/search` 只搜表情包。所以「知道名字查 ID」只能靠本地索引。
+**有服务端搜索。** 之前从二进制里没找到，是因为它不在 IPA 里 —— 抓包之后确认了三个接口，**全部匿名可调，不需要 appkey / sign / access_key**：
 
-### 建索引
+| 接口 | 作用 |
+|---|---|
+| `GET /x/garb/vas/search?key_word=&pn=&ps=&web_location=333.40212` | 按名字搜 |
+| `GET /x/garb/v2/mall/suit/detail?item_id=&web_location=333.40212` | 按 id 取套装全貌 |
+| `GET /x/garb/v2/mall/home/recommend/list?filtered_item_ids=&...` | 遍历在售目录 |
 
-索引来自**别人身上穿着的装扮** —— `x/v2/space/garb/list` 会返回 `garbTitle`（装扮名）+ `garbId`。
-
-```bash
-cd tools
-
-# 从一个种子用户出发，顺着关注链滚雪球
-python catalog.py harvest --seed 2 --max-users 500
-
-# 想扩更大就加大上限，断了可以 --resume 接着跑
-python catalog.py harvest --seed 2 --max-users 5000 --resume
-```
-
-每访问一个用户，就把他的装扮名字和 ID 收进 `data/catalog_db.json`。500 个用户大概能覆盖几百到上千套装扮，看运气。
-
-### 查
+### 搜索
 
 ```bash
-python search.py 夏日
-python search.py 夏日 --status delisted     # 只要下架的
-python search.py --id 12345                 # 按 ID 反查
-python search.py --list --limit 50          # 列出全部
+python tools/garb_api.py search 欧皇
 ```
 
-输出：
-
 ```
-garb_id  image_id status     标题                           素材
-----------------------------------------------------------------
-200001   11       delisted   夏日限定·薄荷                      有
-200002   12       delisted   夏日限定·柠檬                      有
+关键词 '欧皇'  total=5  返回 1 条
+⚠ total 比返回多 4 条 —— 被服务端过滤掉了（多半是下架或非套装）
+
+item_id      名称                         type     价格
+------------------------------------------------------------------------
+120730201    欧皇萨卡班甲鱼                    1        3900  已售389份
 ```
 
-拿到 `garb_id` + `image_id` 就能直接调 `x/v2/space/garb/detail` 取素材，或者喂给 `catalog.json`。
+**`total` 是过滤前的命中数，`list` 是过滤后的。** 两者不相等，就说明有东西被藏起来了。这是判断「某关键词下有没有下架装扮」最快的信号。
 
-### 网页版
+搜索只返回 `goods_type` 1（装扮套装）和 4（收藏集）。
 
-`mall.html` 也能直接开，顶部有搜索框，按中文名模糊匹配（忽略空格和标点）。本地起个服务：
+### 详情
 
 ```bash
-python -m http.server 8000
-# 打开 http://localhost:8000/mall.html
+python tools/garb_api.py detail 120730201
 ```
 
-### 索引查不到怎么办
+拿到 `state`、`properties`（含 `sale_time_begin` / `is_hide` / `sale_quantity` / `owner_uid` / `fan_mid`）、以及 `suit_items`：
 
-说明没人穿着它，或者你的采集没覆盖到。三个补法：
+```
+suit_items:
+   card           2 件  1690250352002 (欧皇甲鱼粉丝)
+   card_bg        1 件  1690250375001 (欧皇甲鱼)
+   emoji_package  1 件  1690194013001 (欧皇甲鱼)
+   skin           1 件  1690250690001 (欧皇甲鱼)
+   space_bg       1 件  1690250416001 (欧皇甲鱼)
+```
 
-1. **加大采集**：`--max-users` 拉到几千，或换不同圈子的种子用户（不同分区的人穿不同装扮）
-2. **主站搜**：B站 搜「装扮名 + 装扮」，看开箱视频/动态，分享链接里带 `item_id`
-3. **抓商城**：Surge 开着，进装扮商城随便翻，`capture` 模式下响应会存下来，里面的 `item_id` + `name` 也能入库
+**只要知道 item_id，下架的也能取到完整数据。** 详情接口不查上架状态。
+
+### 遍历在售目录
+
+`filtered_item_ids` 是个游标 —— 把见过的 id 传进去，返回新的 20 条：
+
+```bash
+python tools/garb_api.py walk --rounds 50
+```
+
+实测 3 轮拿到 59 个不重复 id。跑够轮数就能把在售目录走一遍，存到 `data/mall_ids.json`。这是算「下架集合」的基准。
+
+### 枚举 id 空间
+
+id 是数字且分块密集（41000–41080 这段 81 个 id 里 70 个有效）：
+
+```bash
+python tools/garb_api.py hunt --start 41000 --end 41200
+```
+
+命中率大概七成。适合补 5 位数那段老装扮。
+
+### 速率限制（重要）
+
+B站 WAF 对高频很敏感。我连续探测两百多次之后开始返回 **412 Precondition Failed**，之后要等几分钟到几小时才恢复。
+
+工具默认 1.2 秒一次，遇到 412 会指数退避（90s / 180s / 270s）并换一个 buvid 重试。别调快。
+
+### 本地索引（备选）
+
+如果只想要「我记得那个名字」，不折腾 id 空间，还是可以走本地索引 —— 从别人身上采集：
+
+```bash
+python tools/catalog.py harvest --seed 2 --max-users 500
+python tools/search.py 夏日
+```
+
+`mall.html` 顶部也有搜索框。
 
 ---
 
@@ -183,14 +212,24 @@ argument=cap=100
 | `full` | 0 | 存完整 body（默认只存 2KB 预览） |
 | `only` | 见上 | URL 正则，命中才记 |
 
-### 用它找商城搜索接口
+### 已经用它找到的东西
 
-1. 装上模块，MITM 开着
-2. App 里进装扮商城，用搜索框搜一个词
-3. Safari 打开面板，筛 `search`
-4. 看那条请求的 URL 和 `keys`
+抓了一次商城，摸出完整接口：
 
-如果搜索接口的响应里有 `sale_status` 之类的字段，说明**下架条目可能也能被搜出来** —— 那就比建本地索引省事多了。
+```
+GET  /x/garb/vas/search                      名字搜索
+POST /x/garb/vas/search/recommend            搜索页推荐流
+GET  /x/garb/v2/mall/suit/detail             套装详情（按 item_id）
+GET  /x/garb/v2/mall/home/recommend/list     首页推荐流（filtered_item_ids 可当游标）
+GET  /x/garb/mall_v2/home                    首页（banner / 分类 / 新上架）
+GET  /x/garb/mall_v2/nav                     导航
+GET  /x/garb/popup                           弹窗
+POST /x/garb/vas/exposure/report             曝光埋点
+```
+
+全部不需要 appkey / sign / access_key，Python 直接能调 —— 见 `tools/garb_api.py`。
+
+还想再挖的话，把面板筛 `garb`，把商城里每个页面点一遍，看还漏了哪些。
 
 ---
 
