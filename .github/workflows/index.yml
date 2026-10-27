@@ -5,11 +5,8 @@ on:
     - cron: '17 */4 * * *'     # 每 4 小时跑一次
   workflow_dispatch:
     inputs:
-      rounds:
-        description: 'walk-seeds 轮数'
-        default: '30'
       budget:
-        description: 'neighbors 时间预算（秒）'
+        description: '时间预算（秒）'
         default: '1500'
 
 permissions:
@@ -30,40 +27,31 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: 拉在售目录当种子
+      - name: 跑流水线
+        # ① 全站目录 → ② 找 owner → ③ 排大户 → ④ 采装扮 → ⑤ 判状态 → ⑥ 导出
+        # 每步都查新鲜度，跑过的跳过；预算用完就停，下次接着跑
+        continue-on-error: true
+        run: python tools/pipeline.py --budget ${{ github.event.inputs.budget || 1500 }}
+
+      - name: 收藏集 / 主题（独立，失败不影响主流程）
         continue-on-error: true
         run: |
-          python tools/index_build.py walk-seeds \
-            --rounds ${{ github.event.inputs.rounds || 30 }} --sleep 1.2
-
-      - name: 从「我的装扮」采集
-        continue-on-error: true
-        run: |
-          SEEDS=$(paste -sd, data/seed_vmids.txt)
-          echo "种子: $SEEDS"
-          python tools/index_build.py users --vmids "$SEEDS" --no-follow --expand 40 --sleep 1.2
-
-      - name: 采集收藏集大厅
-        continue-on-error: true
-        run: |
-          SEEDS=$(paste -sd, data/seed_vmids.txt)
-          python tools/collections.py collect --vmids "$SEEDS" --sleep 1.2
-
-      - name: 提取主题部件
-        continue-on-error: true
-        run: python tools/themes.py build --limit 40 --sleep 1.2
-
-      - name: 导出 catalog.json
-        run: python tools/index_build.py export --themes
+          SEEDS=$(paste -sd, data/seed_vmids.txt 2>/dev/null || echo "2")
+          python tools/collections.py collect --vmids "$SEEDS" --sleep 1.2 || true
+          python tools/themes.py build --limit 40 --sleep 1.2 || true
 
       - name: 统计
-        run: python tools/index_build.py stats
+        if: always()
+        run: |
+          python tools/fetch_all.py --stats || true
+          python tools/index_build.py stats || true
 
       - name: 提交
+        if: always()
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/garb_index.json data/mall_ids.json data/themes.json data/collections.json Surge/catalog.json Surge/catalog-themes.json 2>/dev/null || true
+          git add data/ Surge/catalog.json Surge/catalog-themes.json 2>/dev/null || true
           if git diff --cached --quiet; then
             echo "没有变化"
           else

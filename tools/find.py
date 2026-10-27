@@ -56,7 +56,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("q", nargs="?", default="", help="中文名关键词")
     ap.add_argument("--id", type=int, default=0)
-    ap.add_argument("--delisted", action="store_true", help="只看下架的")
+    ap.add_argument("--delisted", action="store_true", help="只看不可买的（售罄 + 已移除）")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--limit", type=int, default=40)
     ap.add_argument("--all", action="store_true", help="连套装子件（表情/卡片）一起显示")
@@ -74,10 +74,13 @@ def main():
 
     def status_of(it):
         if not it.get("suit", True):
-            return "part"          # 套装子件，不参与在售判定
+            return "part"                    # 套装子件
+        st = it.get("status")
+        if st in ("onsale", "soldout", "gone"):
+            return st                        # classify 判出来的真实状态
         if mall is None:
             return "unknown"
-        return "onsale" if it["item_id"] in mall else "delisted"
+        return "onsale" if it["item_id"] in mall else "unknown"
 
     if a.id:
         hits = [x for x in items if x.get("item_id") == a.id]
@@ -94,7 +97,7 @@ def main():
         if suits:
             hits = suits
     if a.delisted:
-        hits = [x for x in hits if status_of(x) == "delisted"]
+        hits = [x for x in hits if status_of(x) in ("soldout", "gone")]
 
     if not hits:
         extra = ""
@@ -118,7 +121,8 @@ def main():
     print("-" * 78)
     for x in hits:
         st = status_of(x)
-        tag = {"onsale": "在售", "delisted": "★下架", "unknown": "?", "part": "部件"}[st]
+        tag = {"onsale": "在售", "soldout": "售罄", "gone": "★已移除",
+               "unknown": "?", "part": "部件"}[st]
         print("%-12s %-26s %-8s %-10s %s" % (
             x["item_id"], str(x.get("name"))[:24], x.get("state") or "-",
             tag, x.get("sale_count") or "-"))

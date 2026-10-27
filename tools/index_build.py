@@ -168,6 +168,52 @@ def cmd_users(a):
     print("\n访问 %d 个用户，索引共 %d 条" % (seen, len(ix["items"])))
 
 
+# ------------------------------------------------------------- classify
+
+def cmd_classify(a):
+    """用 suit/detail 的真实字段判定状态
+
+    正确的判定依据（`mall_ids` 做差集是错的 —— 那只是抽样）：
+        detail 返回空      → gone      商品记录被移除，搜不到
+        sale_surplus > 0   → onsale    还能买
+        sale_surplus == 0  → soldout   卖完了，商品还在，搜得到
+    """
+    ix = load_index()
+    items = list(ix["items"].values())
+    if a.limit:
+        items = items[:a.limit]
+
+    stat = {"onsale": 0, "soldout": 0, "gone": 0, "err": 0}
+    for n, v in enumerate(items, 1):
+        iid = v["item_id"]
+        if v.get("status") in ("onsale", "soldout", "gone") and not a.refresh:
+            stat[v["status"]] += 1
+            continue
+        x, raw = garb_api.detail(iid)
+        if not x or not x.get("name"):
+            v["status"] = "gone"
+            stat["gone"] += 1
+        else:
+            sp = x.get("sale_surplus")
+            v["surplus"] = sp
+            v["state"] = x.get("state")
+            v["sale_end"] = x.get("sale_time_end")
+            if isinstance(sp, int) and sp > 0:
+                v["status"] = "onsale"
+            elif sp == 0:
+                v["status"] = "soldout"
+            else:
+                v["status"] = "unknown"
+            stat[v["status"]] = stat.get(v["status"], 0) + 1
+        if n % 15 == 0:
+            save_index(ix)
+            print("  [%d/%d] %s" % (n, len(items), stat))
+        time.sleep(a.sleep)
+
+    save_index(ix)
+    print("\n判定完成:", stat)
+
+
 # --------------------------------------------------------------- export
 
 def cmd_export(a):
@@ -186,9 +232,10 @@ def cmd_export(a):
     for v in items.values():
         if not v.get("suit", True):
             continue
-        status = "unknown"
-        if mall is not None:
-            status = "onsale" if v["item_id"] in mall else "delisted"
+        # 优先用 classify 判出来的真实状态；没有才退回 mall_ids 差集
+        status = v.get("status")
+        if status not in ("onsale", "soldout", "gone"):
+            status = "unknown"
         out_items.append({
             "garb_id": v["item_id"],
             "image_id": v.get("garb_id") or 0,
@@ -196,17 +243,20 @@ def cmd_export(a):
             "title": v.get("name") or "",
             "large": v.get("cover") or "",
             "small": (v.get("images") or [""])[0] if v.get("images") else v.get("cover") or "",
+            "images": v.get("images") or [],
+            "fans_number": v.get("fans_number") or "",
             "status": status,
         })
 
-    out_items.sort(key=lambda x: (x["status"] != "delisted", -x["garb_id"]))
+    out_items.sort(key=lambda x: (x["status"] not in ("gone", "soldout"), -x["garb_id"]))
     out = a.out or os.path.join(ROOT, "Surge", "catalog.json")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"generated": time.strftime("%Y-%m-%d %H:%M:%S"),
                    "items": out_items}, f, ensure_ascii=False, indent=1)
-    n_del = sum(1 for x in out_items if x["status"] == "delisted")
-    print("导出 %d 条（下架 %d）-> %s" % (len(out_items), n_del, out))
+    n_gone = sum(1 for x in out_items if x["status"] == "gone")
+    n_sold = sum(1 for x in out_items if x["status"] == "soldout")
+    print("导出 %d 条（gone %d / soldout %d）-> %s" % (len(out_items), n_gone, n_sold, out))
 
     if a.themes:
         export_themes(mall)
@@ -225,11 +275,10 @@ def export_themes(mall):
         themes = (json.load(f).get("themes") or {})
 
     ix = load_index()
+    # 用 classify 判出来的真实状态，不再拿 mall_ids 抽样做差集
     suit_status = {}
     for v in (ix.get("items") or {}).values():
-        if mall is None:
-            continue
-        suit_status[v["item_id"]] = "onsale" if v["item_id"] in mall else "delisted"
+        suit_status[v["item_id"]] = v.get("status") or "unknown"
 
     out_items = []
     for t in themes.values():
@@ -249,14 +298,45 @@ def export_themes(mall):
             "package_url": p.get("package_url"),
         })
 
-    out_items.sort(key=lambda x: (x["status"] != "delisted", -x["garb_id"]))
+    out_items.sort(key=lambda x: (x["status"] not in ("gone", "soldout"), -x["garb_id"]))
+
+    # 额外导一份 BFCMultiThemePkg 形状的包，方便注入主题列表
+    packages = []
+    for t in themes.values():
+        pp = t.get("props") or {}
+        if not pp.get("package_url"):
+            continue
+        packages.append({
+            "themeId": t["theme_item_id"],
+            "name": t.get("name") or t.get("suit_name") or "",
+            "downloadUrl": pp.get("package_url"),
+            "md5Str": pp.get("package_md5") or "",
+            "resourcePath": "",
+            "themeDic": pp,
+            "type": 0,
+            "alias": "",
+            "attribute": 0,
+            "isOffical": True,
+            "canChange": True,
+            "isForce": False,
+            "hideDialog": False,
+            "needUpdate": False,
+            "stime": 0,
+            "etime": 0,
+            "version": pp.get("ver") or 0,
+            "suit_item_id": t.get("suit_item_id"),
+            "status": suit_status.get(t.get("suit_item_id"), "unknown"),
+        })
+
     out = os.path.join(ROOT, "Surge", "catalog-themes.json")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as f:
         json.dump({"generated": time.strftime("%Y-%m-%d %H:%M:%S"),
-                   "items": out_items}, f, ensure_ascii=False, indent=1)
-    nd = sum(1 for x in out_items if x["status"] == "delisted")
-    print("导出皮肤 %d 条（下架 %d）-> %s" % (len(out_items), nd, out))
+                   "items": out_items, "packages": packages},
+                  f, ensure_ascii=False, indent=1)
+    nd = sum(1 for x in out_items if x["status"] in ("gone", "soldout"))
+    print("导出皮肤 %d 条（不可买 %d），主题包 %d 个 -> %s"
+          % (len(out_items), nd, len(packages), out))
 
 
 # ----------------------------------------------------------------- rank
@@ -427,6 +507,12 @@ def cmd_stats(a):
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    cl = sub.add_parser("classify")
+    cl.add_argument("--limit", type=int, default=0)
+    cl.add_argument("--refresh", action="store_true")
+    cl.add_argument("--sleep", type=float, default=garb_api.DEFAULT_SLEEP)
+    cl.set_defaults(func=cmd_classify)
 
     ex = sub.add_parser("export")
     ex.add_argument("--out", default="")

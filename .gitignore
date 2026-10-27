@@ -7,3 +7,9 @@ __pycache__/
 # 抓包落盘
 capture/
 preview.json
+
+# 本地预览
+Surge/preview.html
+
+# 纯缓存，每次 CI 重拉（2MB+，别进版本库）
+data/all_garbs.json

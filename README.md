@@ -22,7 +22,14 @@ Surge/bili-garb-mall.sgmodule   注入模块（装这个）
 Surge/garb_mall_inject.js       注入脚本，运行时自识别列表结构
 Surge/catalog.json              下架装扮库（index_build export 产出）
 Surge/catalog-themes.json       下架皮肤库（export --themes 产出）
+Surge/catalog-all.json          全站装扮目录（4786 条，565 KB）
+Surge/bili-garb-search.sgmodule 搜索模块（App 内搜索 + 独立搜索页）
+Surge/bili-garb-live.sgmodule   现取模块（不建库，填 vmid 即用）
+Surge/garb_search_view.js       搜索页
 Surge/bili-garb-skin.sgmodule   皮肤注入模块（待填 pattern）
+tools/theme_probe.py            主题接口探测 / 学习 / 合并验证
+tools/fetch_all.py              全站目录拉取（key_word=*）
+tools/pipeline.py               全自动流水线（六步串起来）
 Surge/bili-capture.sgmodule     抓包模块（可选）
 Surge/capture_record.js         抓包记录
 Surge/capture_view.js           抓包面板
@@ -58,6 +65,56 @@ https://raw.githubusercontent.com/Suk1u/1/main/Surge/bili-garb-mall.sgmodule
 
 ---
 
+## 全自动流水线
+
+一条命令跑完整套：
+
+```bash
+python tools/pipeline.py --budget 1500
+```
+
+六步，每步都查新鲜度，跑过的跳过；预算用完就停，下次接着跑：
+
+```
+① 全站目录    key_word=* 拉 4786 条        新鲜 7 天内跳过
+② 找 owner    从装扮的 owner_uid 反推 UP 主  新鲜 3 天内跳过
+③ 排大户      查每个 owner 拥有多少套        新鲜 2 天内跳过
+④ 采装扮      从大户的「我的装扮」拿 garb_id + item_id + 名字
+⑤ 判状态      sale_surplus / detail 空
+⑥ 导出        catalog.json / catalog-themes.json
+```
+
+### 为什么是「找 owner」而不是「爬关注链」
+
+`x/relation/followings` 要登录态，CI 里跑不了。
+
+但每个装扮的 `suit/detail` 里有 `properties.owner_uid`——**做这套装扮的 UP 主**。这些人自己往往收藏最多。从全站目录里抽样拿 owner_uid，再查他们拥有几套，就是天然的「大户榜」。
+
+### 实测一轮
+
+```
+② 找 owner   → 19 个
+③ 排大户      → 9 个拥有 50 套（ps=50 上限，实际可能更多）
+              3493131766991076(50) 672197118(50) 670729222(50)
+              3493134470220310(50) 5888511(50) 15938156(49) ...
+④ 采装扮      → 索引 69 → 444 条，102 秒
+⑤ 判状态      → 19 gone / 102 onsale / 8 soldout / 315 待判
+⑥ 导出        → catalog.json 444 条
+```
+
+一次跑 102 秒索引涨 6.4 倍。CI 每 4 小时接着跑，剩下的 315 条会慢慢判完，同时继续找新的大户。
+
+### 手动控制
+
+```bash
+python tools/pipeline.py --only 4,5,6        # 只跑采装扮/判状态/导出
+python tools/pipeline.py --budget 600        # 10 分钟
+python tools/pipeline.py --limit 20          # 每步最多处理 20 个
+python tools/pipeline.py --dry               # 只看计划不动手
+```
+
+---
+
 ## 建库
 
 下架装扮只在「我的装扮」里。所以索引从已拥有列表采集，不是从商城。
@@ -81,100 +138,146 @@ python tools/index_build.py export
 
 ---
 
-## 按中文名搜下架装扮
+## 状态到底怎么分
 
-**下架的装扮只出现在「我的装扮」里。** 商城搜不到，但已拥有列表里还在 —— 这是唯一能拿到名字和 ID 对应关系的地方。
+先纠正一个容易搞错的地方：**下架不等于搜不到**。
 
-`x/v2/space/garb/list` 一条记录同时给出：
+用 `suit/detail` 的真实字段判，只有三种：
+
+| status | 判定依据 | 搜索能搜到？ | 商城列表显示？ |
+|---|---|---|---|
+| `onsale` | `sale_surplus > 0` | ✅ | ✅ |
+| `soldout` | `sale_surplus == 0` | ✅ | ❌ |
+| `gone` | `suit/detail` 返回空 | ❌ | ❌ |
+
+实测 69 条：**43 在售 / 8 售罄 / 18 已移除**。
+
+**关键**：`soldout` 和 `gone` 是两件事。
+
+- **售罄** —— 商品记录还在，搜索索引里有，按名字搜得到，只是买不了
+- **已移除** —— 商品记录被删了，`suit/detail` 查不到，搜索也搜不到
+
+### 售罄具体是什么
+
+B站 装扮绝大多数是**限量发售**。`suit/detail` 里两个字段说明一切：
 
 ```
-garb_title    "2021拜年纪"          ← 中文名
-garb_id       3864                  ← 13 位形象 ID
-button.uri    ...suit/detail?id=3898 ← 9 位 item_id
-images[]      立绘
-fans_number   NO.021206             ← 持有编号
+sale_quantity   10000     总发行量
+sale_surplus    0         剩余库存
 ```
 
-### 三步
+`sale_surplus` 归零就是售罄。四个实测样本：
+
+| 装扮 | 总发行 | 剩余 | 已售 | 结论 |
+|---|---:|---:|---|---|
+| 七海Nana7mi VR | 10,000 | **0** | 1万+ | 售罄 |
+| BML2021 | 50,000 | 37,833 | 1万+ | 在售 |
+| EveOneCat2 | 1,000,000 | 675,437 | 30万+ | 在售 |
+| 雫るる制服ver. | 30,000 | 17,707 | 1万+ | 在售 |
+
+相关字段：
+
+| 字段 | 含义 |
+|---|---|
+| `sale_quantity` | 总发行量 |
+| `sale_surplus` | 剩余库存，**0 = 售罄** |
+| `sale_quantity_limit` | 是否限量（`true` 才会计库存） |
+| `sale_buy_num_limit` | 单账号限购数（实测都是 100） |
+| `sale_reserve_switch` | 是否需要预约 |
+| `next_activity` | **有值说明还有后续活动**（补货 / 折扣） |
+
+`七海Nana7mi` 的 `next_activity` 是 `null` —— 没有补货计划，就是真的没了。
+`BML2021` 和 `EveOneCat2` 有 `open_platform_vip_discount`，说明还有大会员折扣活动。
+
+**售罄之后**：持有者照样能穿，详情页还能打开，搜索还能搜到，只是官方渠道买不到。
+
+### 为什么「我的装扮」能拿到已移除的
+
+B站 存了两套互不相干的记录：
+
+| | 键 | 内容 | 商品删了会怎样 |
+|---|---|---|---|
+| **商品库** | `item_id` | 名称、库存、价格、部件 | 记录消失，`suit/detail` 返回空 |
+| **持有库** | `mid` + `garb_id` | 名称、立绘、持有编号 | **不受影响**，一直在 |
+
+`x/v2/space/garb/list?vmid=X` 读的是**持有库**，所以：
+
+```
+item_id       garb_title              状态      立绘
+211450401     椿屋小奈Yomi·永恒花嫁     gone      4 张
+3898          2021拜年纪              gone      4 张
+```
+
+这两条 `suit/detail` 都查不到，但「我的装扮」返回得**比商城还全**：
+
+```json
+{
+  "garb_title": "椿屋小奈Yomi·永恒花嫁",
+  "item_id": 211450401,
+  "garb_id": 1713863778001,
+  "fans_number": "NO.000003",
+  "images": [".../42961345.jpg", ".../e17830f0.jpg", ".../357989f9.jpg", ".../a2dbdc74.jpg"]
+}
+```
+
+**立绘直接在列表响应里**，不用再调任何接口。
+
+所以 `gone` 那批的获取路径只有一条：
+
+```
+别人的「我的装扮」 → garb_title + item_id + garb_id + 立绘
+```
+
+这也解释了为什么这个项目一开始的方向是对的 —— 下架的确实只在「我的装扮」里，但原因不是「商城搜不到」，而是**商品记录删了、持有记录还在**。
+
+所以「下架装扮搜不到」这个说法只对 `gone` 成立。真正下架但记录还在的，搜名字是能出来的。
+
+### 为什么之前判错了
+
+我一开始用「`item_id` 不在商城推荐流里」判定下架。**这是错的** —— 推荐流只有 260 个，是抽样，不是全量目录。拿抽样做差集，会把大量还在卖的商品误判成下架。
+
+正确的做法是调 `suit/detail` 看 `sale_surplus`：
 
 ```bash
-# 1. 从「我的装扮」采集（自己的 vmid 起步，顺关注链扩）
-python tools/index_build.py users --vmids <你的vmid> --expand 300
-
-# 2. 搜
-python tools/find.py 拜年
-
-# 3. 只要下架的
-python tools/find.py 拜年 --delisted
+python tools/index_build.py classify --refresh
 ```
 
-输出：
+---
 
-```
-item_id      名称                         state    在售?        销量
-------------------------------------------------------------------------------
-3898         2021拜年纪                    -        ★下架        -
-```
-
-拿到 `item_id` 就能调 `suit/detail` 取全貌，`garb_id` 能调 `space/garb/detail` 取立绘。
-
-### 实测
-
-按 `data/seed_vmids.txt` 里 7 个种子采了一轮，**69 条里 63 条是下架的**：
-
-```
-呜米              5829        ★下架
-美波七海           5797        ★下架
-洛天依9th生日纪念    5766        ★下架
-明日方舟           55655       ★下架
-明日方舟·灯下定影    39220       ★下架
-永雏塔菲·1883      38120       ★下架
-神乐七奈           3796        ★下架
-领结猫            108947802   ★下架
-猫雷Nyaru         36739       ★下架
-明日方舟音律联觉     5359        在售
-永雏塔菲           33023       在售
-```
-
-在售判定靠 `walk-seeds` 拉的全量在售目录做差集。
-
-### 找更多大户
-
-种子里 `647193094`（腾讯招聘）一个人就有 50 套。想找同类账号：
+## 按中文名搜
 
 ```bash
-python tools/index_build.py rank --from-owners --owner-sample 50
+python tools/find.py 明日方舟
 ```
 
-它会从在售装扮的 `properties.owner_uid` 反推候选（做装扮的 UP 主自己收藏最多），再按拥有套数排序。把结果补进 `data/seed_vmids.txt` 就行。
+```
+item_id      名称                        在售?
+--------------------------------------------
+55655        明日方舟                      在售
+2010         明日方舟                      在售
+5359         明日方舟音律联觉                 在售
+39220        明日方舟·灯下定影                ★已移除
+```
 
-> 顺关注链扩展（`--follow`）需要登录态，`x/relation/followings` 会返回 `-101 账号未登录`。CI 里跑不了，本地有 access_key 才能用。
+`--delisted` 只列售罄 + 已移除的。
 
-### 覆盖范围
+### 搜不到的怎么办
 
-索引里有多少，取决于采集了多少人的「我的装扮」。想扩就：
+`gone` 那批连 `suit/detail` 都查不到，搜索索引里也没有。只能从**别人的「我的装扮」**里翻出来 —— 因为持有记录是独立的，商品记录删了，用户的持有还在。
 
 ```bash
-# 多喂几个大号 vmid（粉丝多的人通常装扮也多）
-python tools/index_build.py users --vmids 2,946974,3797584 --expand 500
-
-# 补在售目录，让「在售/下架」判定更准
-python tools/index_build.py walk-seeds --rounds 50
+python tools/index_build.py users --vmids $(paste -sd, data/seed_vmids.txt) --no-follow
 ```
 
-`--expand` 会顺着关注链滚雪球。断了重跑会跳过已采过的用户。
+这也是为什么 `我的装扮` 是唯一能捞到 `gone` 的入口。
 
-### 备选：商城搜索
-
-商城搜索接口是有的，但**只返回在售**，救不了下架：
+### 商城搜索（只出在售 + 售罄）
 
 ```
 GET /x/garb/vas/search?key_word=&pn=&ps=&web_location=333.40212
 ```
 
-`total` 是过滤前命中数，`list` 是过滤后。试过 30 多个参数、8 个 location 变体、POST body，**没有一个能放出下架项**。
-
-想查在售的用它更快：
+匿名可调。`total` 是过滤前命中数，`list` 是过滤后 —— 差值通常来自非套装商品（表情包、卡片），不一定是下架。
 
 ```bash
 python tools/garb_api.py search 欧皇
@@ -183,7 +286,186 @@ python tools/garb_api.py detail 120730201
 
 ### 速率
 
-B站 WAF 对高频敏感，连打两百多次会开始返回 412，要等冷却。工具默认 1.2 秒一次 + 指数退避。
+B站 WAF 对高频敏感，连打两百多次会 412，要等冷却。工具默认 1.2 秒一次 + 指数退避。
+
+---
+
+## 全站装扮目录
+
+搜索接口的 `key_word` 传 `*` 会返回全部：
+
+```
+GET /x/garb/vas/search?key_word=*&pn=1&ps=100
+→ total = 5282
+```
+
+`ps` 上限 100（传 200 也只给 99），所以 53 个请求拉完。
+
+```bash
+python tools/fetch_all.py            # 全量拉，约 1 分钟
+python tools/fetch_all.py --stats
+python tools/fetch_all.py --grep 猫   # 本地搜
+```
+
+实测拉到 **4786 / 5282**（90%）。差的那 496 是分页漂移——搜索结果的排序在多次请求之间会变，翻页会漏。多扫几轮能补，但不是必须。
+
+导出给搜索页用的紧凑格式在 `Surge/catalog-all.json`（565 KB）：
+
+```json
+[item_id, name, cover, owned(0/1), garb_id, goods_type]
+```
+
+### 两套 id，这是「应用」的边界
+
+| | 是什么 | 谁给 | 用途 |
+|---|---|---|---|
+| `item_id` | 商品 id（9 位为主） | 搜索 / 详情 | 查资料 |
+| `garb_id` | 装扮 id（13 位或 4-5 位） | **只有「我的装扮」给** | `dress` 应用 |
+
+`suit/detail` 里的 `suit_items[].item_id` 也不是 `garb_id`——BML2021 的 suit_items 是 5202/5222/5221…，而它作为用户装扮时 `garb_id` 是另一套编号。
+
+**结论**：
+
+- **搜索全部装扮** → ✅ 4786 条，`catalog-all.json`
+- **应用** → 只有 `garb_id` 已知的才行，而 `garb_id` 只出现在「我的装扮」里
+- **「我的装扮」只列已拥有的** → 所以能应用的 = 已拥有的
+
+下架的装扮如果**你已经拥有**，`garb_id` 在列表里，`dress` 服务端 `isOwn=true` 通过 —— 能搜、能穿。
+没拥有的，`garb_id` 根本不知道，连请求都构造不出来。
+
+搜索页里 `status=owned` 的才有 `garb_id`，详情里会显示「可以」并给出 dress 参数；`status=catalog` 的显示「不行 —— 缺 garb_id」。
+
+---
+
+## 在 App 里搜下架装扮
+
+装这个模块：
+
+```
+https://raw.githubusercontent.com/Suk1u/1/main/Surge/bili-garb-search.sgmodule
+```
+
+它做两件事：
+
+### ① App 内搜索注入
+
+拦截 `x/garb/vas/search`，把库里名字命中的下架装扮追加到搜索结果。
+
+```
+你在商城搜「七海」
+  ↓
+官方返回：七海Nana7mi（售罄）
+  ↓
+模块追加：美波七海（已下架）
+  ↓
+搜索结果里两条都在
+```
+
+**按关键词过滤**：脚本从请求 URL 里读 `key_word`，只注入名字包含它的条目。搜「明日方舟」不会冒出「七海」。
+
+一次最多注入 20 条，不撑爆列表。
+
+### ② 独立搜索页
+
+Safari 打开：
+
+```
+https://api.bilibili.com/__garb_search
+```
+
+一个完整的搜索界面，输入中文名模糊匹配（忽略空格标点）。
+
+**列表**：立绘 + 状态标签（已移除 / 售罄 / 在售 / 皮肤）+ `garb_id / image_id`
+
+**点开详情**：
+
+- 大图轮播（`images[]` 多张时左右滑，底部有指示点）
+- 状态、`garb_id`、`image_id`、持有编号、配色模式
+- 按钮：复制 item_id / 复制 garb_id / 下载主题包（皮肤才有）/ 打开官方详情页
+
+数据来自 `catalog.json` + `catalog-themes.json`，和模块共用。
+
+### 覆盖范围
+
+搜得到多少，取决于 `catalog.json` 里有多少。现在 69 条（43 在售 / 8 售罄 / 18 已移除）。
+
+扩充靠 Actions 每 4 小时跑一次，或手动：
+
+```bash
+python tools/index_build.py users --vmids $(paste -sd, data/seed_vmids.txt) --no-follow
+python tools/index_build.py classify
+python tools/index_build.py export --themes
+```
+
+---
+
+## 不建库：现取模式
+
+前面那套（Actions 采集 → 导出 catalog → 模块读）覆盖广，但要等 CI 跑。**如果只想搜自己账号里的装扮，有更省事的路**：
+
+```
+https://raw.githubusercontent.com/Suk1u/1/main/Surge/bili-garb-live.sgmodule
+```
+
+装之前改一个地方——把 `vmid=2` 换成你自己的 UID（点开自己空间，地址栏 `/space/` 后面那串数字）。
+
+改完就完事了，不用建库、不用 CI、不用 GitHub。
+
+### 它怎么工作的
+
+模块里带了一份 MD5 实现，**自己在 JS 里算签名**：
+
+```
+1. 你在商城搜「七海」
+2. 模块拦下响应
+3. 同时用你的 vmid 调 x/v2/space/garb/list（appkey + ts + sign 现场算）
+4. 拿到你「我的装扮」里的全部装扮
+5. 按关键词过滤，追加到搜索结果
+```
+
+签名逻辑和 `tools/garb_api.py` 里那套完全一致，只是从 Python 搬到了 JS：
+
+```js
+sign = md5(sorted_query + appsec)
+```
+
+`appkey` / `appsec` 从 IPA 二进制里提的，iOS 那对。
+
+### 缓存
+
+拉一次存 `$persistentStore`，6 小时有效。不重复请求。
+
+### 两种模式对比
+
+| | 建库（`bili-garb-search`） | 现取（`bili-garb-live`） |
+|---|---|---|
+| 覆盖 | 所有种子用户采到的（69 条，跨账号） | **只有你自己账号的** |
+| 依赖 | GitHub Actions + raw CDN | 无 |
+| 首次延迟 | 0（读缓存） | 一次 API 往返 |
+| 能搜到别人的下架装扮 | ✅ | ❌ |
+| 需要改配置 | 不用 | 填 vmid |
+
+**建议两个都装**：现取兜底（自己的收藏一定在），建库补全（别人的收藏）。
+
+### 实测
+
+vmid=2（b站官方）现取到 7 套：
+
+```
+211450401  椿屋小奈Yomi·永恒花嫁（我的装扮）
+39495      蕾蕾大表哥（我的装扮）
+32296      EveOneCat2（我的装扮）
+5235       BML2021（我的装扮）
+3898       2021拜年纪（我的装扮）
+2575       七海Nana7mi（我的装扮）
+1157       如果历史是一群喵（我的装扮）
+```
+
+其中 211450401 和 3898 连 `suit/detail` 都查不到（商品记录已删），照样拿得到。
+
+### 后缀
+
+现取模式默认标「（我的装扮）」而不是「（已下架）」——因为它不判断状态，只说明「这是你收藏里的」。要改就改 `argument` 里的 `suffix=`。
 
 ---
 
@@ -300,6 +582,112 @@ horizontal_card_light_url / vertical_card_light_url ...
 ```
 
 但 `card_id` 传 `card_type_id` 拿到的全是 0，参数语义还没对上。**要往下挖得先抓一次收藏集详情页。**
+
+---
+
+## 能不能「假装拥有」本地用起来
+
+分两种，效果完全不同。
+
+### 装扮套装 —— 只能骗显示
+
+套装是**服务端状态**。`x/v2/space/garb/dress` 服务端校验 `isOwn`，客户端说了不算。
+
+能做的只有：拦截 `x/v2/space` 或 `space/garb/detail` 的响应，把立绘 URL 换成下架那套的。本地看自己空间「穿上了」，但：
+
+- 服务端记录没变
+- 别人看你还是原样
+- 点「穿戴」按钮，服务端照样拒
+
+**纯视觉，不是真拥有。**
+
+### 主题 / 皮肤 —— 有真实的本地化空间
+
+这块不一样。`BFCMultiThemePkg` 的字段说明了一切：
+
+```objc
+themeId  name  version
+resourcePath     本地路径
+downloadUrl      下载地址
+md5Str           校验
+themeDic         主题定义（35 个字段）
+isOffical  canChange  isForce  needUpdate
+stime  etime     有效期
+```
+
+**主题是本地包**。客户端流程是：
+
+```
+拿列表 → 下载 zip 到 resourcePath → 校验 md5Str → 从 themeDic 应用
+```
+
+`BFCMultiTheme` 的方法也印证了：`initLocalThemes` / `switchThemeWithId:` / `getValidPkg` / `_localThemeArray`。
+
+所以只要能把一个包塞进主题列表，客户端会自己下载、校验、应用 —— **本地真的换掉**，不经过任何「你拥没拥有」的检查。
+
+### 数据已经备好了
+
+`export --themes` 现在多导一份 `packages`，形状就是 `BFCMultiThemePkg`：
+
+```json
+{
+  "themeId": 5224,
+  "name": "BML2021",
+  "downloadUrl": "https://i0.hdslb.com/bfs/garb/zip/7355fde4....zip",
+  "md5Str": "041cb8b510b3ee6486f696cf3f1a0d0e",
+  "themeDic": { ...35 个字段，配色/背景/图标全在... },
+  "isOffical": true, "canChange": true, "isForce": false,
+  "stime": 0, "etime": 0
+}
+```
+
+实测 4 个包，其中 `七海Nana7mi` 是售罄状态，`BML2021` / `蕾蕾大表哥` / `EveOneCat2` 在售。
+
+### 缺的还是那一步
+
+主题列表接口的 URL 仍然不知道（皮肤走装扮中心那个 H5，包里没有）。
+
+抓到之后用 `theme_probe.py` 一条龙：
+
+```bash
+# 1. 分析抓包，判断像不像主题列表，给出要填的 pattern
+python tools/theme_probe.py learn --capture capture/xxx.json
+
+# 2. 真的合并一遍，看效果
+python tools/theme_probe.py simulate --capture capture/xxx.json
+
+# 3. 填进模块
+#    pattern=^https://////api//.bilibili//.com///x///garb///v2///mall///theme///list
+#    mode=theme
+#    catalog=.../catalog-themes.json
+```
+
+`learn` 的判断标准：数组元素同时有 id 类字段（`themeId`/`id`）和资源类字段（`downloadUrl`/`themeDic`/`resourcePath`）。
+
+实测（用 mock 抓包）：
+
+```
+找到 1 个候选：
+    2 个  /data/theme_list
+        字段  themeId, name, downloadUrl, md5Str, resourcePath, themeDic, isOffical, canChange
+
+=== 建议配置 ===
+  pattern   ^https://////api//.bilibili//.com///x///garb///v2///mall///theme///list
+  mode      theme
+```
+
+`simulate` 会把 4 个包（含 35 个字段的 themeDic）合并进列表，写到 `preview-theme.json` 供 diff。
+
+注入逻辑只按 `themeId` 去重 —— 已有的不重复塞，缺的补上。
+
+### 一句话总结
+
+| | 装扮套装 | 主题 / 皮肤 |
+|---|---|---|
+| 状态存在哪 | 服务端 | 本地包 |
+| 能骗显示 | ✅ | ✅ |
+| 能真的用 | ❌ 服务端校验 | ✅ 只要包能下能校验 |
+| 缺什么 | 无（已能做） | 列表接口 URL |
 
 ---
 

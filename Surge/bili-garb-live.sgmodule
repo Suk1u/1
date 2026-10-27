@@ -1,0 +1,15 @@
+#!name=哔哩哔哩 · 装扮搜索（现取，不建库）
+#!desc=不需要任何离线库。填上你的 vmid，模块自己去拉「我的装扮」，搜索时把里面的装扮一并显示。零依赖，装上即用。
+#!system=ios
+#!author=Suk1u
+#!homepage=https://github.com/Suk1u/1
+
+[Script]
+# ⚠ 把 vmid= 后面换成你自己的 B站 UID（点开自己空间，地址栏 /space/ 后面那串数字）
+garb-live-inject = type=http-response,pattern=^https:\/\/api\.bilibili\.com\/x\/garb\/vas\/search,requires-body=1,max-size=0,script-path=https://raw.githubusercontent.com/Suk1u/1/main/Surge/garb_mall_inject.js,argument=vmid=2&suffix=%EF%BC%88%E6%88%91%E7%9A%84%E8%A3%85%E6%89%AE%EF%BC%89&force=1
+
+# 可选：商城列表也注入
+# garb-live-mall = type=http-response,pattern=^https:\/\/api\.bilibili\.com\/x\/garb\/v2\/mall,requires-body=1,max-size=0,script-path=https://raw.githubusercontent.com/Suk1u/1/main/Surge/garb_mall_inject.js,argument=vmid=2&suffix=%EF%BC%88%E6%88%91%E7%9A%84%E8%A3%85%E6%89%AE%EF%BC%89&force=1
+
+[MITM]
+hostname = %APPEND% api.bilibili.com, app.bilibili.com

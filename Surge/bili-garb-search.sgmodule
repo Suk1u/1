@@ -1,0 +1,15 @@
+#!name=哔哩哔哩 · 装扮搜索（含下架）
+#!desc=搜索页覆盖全站 4786 套装扮，标注哪些已拥有、哪些能应用。另有 App 内搜索注入，把下架的也搜出来。
+#!system=ios
+#!author=Suk1u
+#!homepage=https://github.com/Suk1u/1
+
+[Script]
+# ① 独立搜索页：Safari 打开 https://api.bilibili.com/__garb_search
+garb-search-page = type=http-request,pattern=^https:\/\/api\.bilibili\.com\/__garb_search,script-path=https://raw.githubusercontent.com/Suk1u/1/main/Surge/garb_search_view.js,argument=catalog=https%3A%2F%2Fraw.githubusercontent.com%2FSuk1u%2F1%2Fmain%2FSurge%2Fcatalog-all.json&themes=https%3A%2F%2Fraw.githubusercontent.com%2FSuk1u%2F1%2Fmain%2FSurge%2Fcatalog-themes.json
+
+# ② App 内搜索注入：在装扮商城搜索框搜名字，下架的也会出现
+garb-search-inject = type=http-response,pattern=^https:\/\/api\.bilibili\.com\/x\/garb\/vas\/search,requires-body=1,max-size=0,script-path=https://raw.githubusercontent.com/Suk1u/1/main/Surge/garb_mall_inject.js,argument=catalog=https%3A%2F%2Fraw.githubusercontent.com%2FSuk1u%2F1%2Fmain%2FSurge%2Fcatalog.json&suffix=%EF%BC%88%E5%B7%B2%E4%B8%8B%E6%9E%B6%EF%BC%89&force=1
+
+[MITM]
+hostname = %APPEND% api.bilibili.com, app.bilibili.com
