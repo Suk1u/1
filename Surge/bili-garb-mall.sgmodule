@@ -1,0 +1,11 @@
+#!name=哔哩哔哩 · 装扮商城显示已下架装扮
+#!desc=拦截装扮商城列表响应，把已下架装扮注入进去。列表结构运行时自动识别，不依赖抓包。条目会带「（已下架）」后缀和灰色角标，点进去买不了属于预期。
+#!system=ios
+#!author=Suk1u
+#!homepage=https://github.com/Suk1u/1
+
+[Script]
+garb-mall-inject = type=http-response,pattern=^https:\/\/(api|app)\.bilibili\.com\/x\/(garb|garb-digital),requires-body=1,max-size=0,script-path=https://raw.githubusercontent.com/Suk1u/1/main/Surge/garb_mall_inject.js,argument=catalog=https%3A%2F%2Fraw.githubusercontent.com%2FSuk1u%2F1%2Fmain%2FSurge%2Fcatalog.json&suffix=%EF%BC%88%E5%B7%B2%E4%B8%8B%E6%9E%B6%EF%BC%89&force=1
+
+[MITM]
+hostname = %APPEND% api.bilibili.com, app.bilibili.com
