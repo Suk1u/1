@@ -25,7 +25,9 @@ Surge/catalog.json              下架装扮库
 mall.html                       本地索引浏览器，带中文名搜索框
 tools/catalog.py                采集 / 校验 / 快照 / 建库 / 滚雪球
 tools/search.py                 本地索引搜索（备选）
-tools/garb_api.py               商城接口客户端（搜索 / 详情 / 遍历 / 枚举）
+tools/garb_api.py               商城接口客户端（搜索 / 详情 / 我的装扮）
+tools/index_build.py            索引构建（我的装扮 / 在售目录 / id 枚举）
+tools/find.py                   按中文名搜，含下架
 tools/bili.py                   签名 + 接口封装
 data/catalog_db.json            名字索引数据库（harvest 产出）
 ```
@@ -74,90 +76,93 @@ python catalog.py build
 
 ---
 
-## 按中文名反查 ID
+## 按中文名搜下架装扮
 
-**有服务端搜索。** 之前从二进制里没找到，是因为它不在 IPA 里 —— 抓包之后确认了三个接口，**全部匿名可调，不需要 appkey / sign / access_key**：
+**下架的装扮只出现在「我的装扮」里。** 商城搜不到，但已拥有列表里还在 —— 这是唯一能拿到名字和 ID 对应关系的地方。
 
-| 接口 | 作用 |
-|---|---|
-| `GET /x/garb/vas/search?key_word=&pn=&ps=&web_location=333.40212` | 按名字搜 |
-| `GET /x/garb/v2/mall/suit/detail?item_id=&web_location=333.40212` | 按 id 取套装全貌 |
-| `GET /x/garb/v2/mall/home/recommend/list?filtered_item_ids=&...` | 遍历在售目录 |
+`x/v2/space/garb/list` 一条记录同时给出：
 
-### 搜索
+```
+garb_title    "2021拜年纪"          ← 中文名
+garb_id       3864                  ← 13 位形象 ID
+button.uri    ...suit/detail?id=3898 ← 9 位 item_id
+images[]      立绘
+fans_number   NO.021206             ← 持有编号
+```
+
+### 三步
+
+```bash
+# 1. 从「我的装扮」采集（自己的 vmid 起步，顺关注链扩）
+python tools/index_build.py users --vmids <你的vmid> --expand 300
+
+# 2. 搜
+python tools/find.py 拜年
+
+# 3. 只要下架的
+python tools/find.py 拜年 --delisted
+```
+
+输出：
+
+```
+item_id      名称                         state    在售?        销量
+------------------------------------------------------------------------------
+3898         2021拜年纪                    -        ★下架        -
+```
+
+拿到 `item_id` 就能调 `suit/detail` 取全貌，`garb_id` 能调 `space/garb/detail` 取立绘。
+
+### 实测
+
+b站官方号（vmid=2）名下 7 套装扮，6 套是下架的：
+
+```
+椿屋小奈Yomi·永恒花嫁   211450401   ★下架
+蕾蕾大表哥            39495       ★下架
+EveOneCat2           32296       在售
+BML2021              5235        ★下架
+2021拜年纪            3898        ★下架
+七海Nana7mi          2575        ★下架
+如果历史是一群喵        1157        ★下架
+```
+
+在售判定靠 `walk-seeds` 拉的全量在售目录做差集。
+
+### 覆盖范围
+
+索引里有多少，取决于采集了多少人的「我的装扮」。想扩就：
+
+```bash
+# 多喂几个大号 vmid（粉丝多的人通常装扮也多）
+python tools/index_build.py users --vmids 2,946974,3797584 --expand 500
+
+# 补在售目录，让「在售/下架」判定更准
+python tools/index_build.py walk-seeds --rounds 50
+```
+
+`--expand` 会顺着关注链滚雪球。断了重跑会跳过已采过的用户。
+
+### 备选：商城搜索
+
+商城搜索接口是有的，但**只返回在售**，救不了下架：
+
+```
+GET /x/garb/vas/search?key_word=&pn=&ps=&web_location=333.40212
+```
+
+`total` 是过滤前命中数，`list` 是过滤后。试过 30 多个参数、8 个 location 变体、POST body，**没有一个能放出下架项**。
+
+想查在售的用它更快：
 
 ```bash
 python tools/garb_api.py search 欧皇
-```
-
-```
-关键词 '欧皇'  total=5  返回 1 条
-⚠ total 比返回多 4 条 —— 被服务端过滤掉了（多半是下架或非套装）
-
-item_id      名称                         type     价格
-------------------------------------------------------------------------
-120730201    欧皇萨卡班甲鱼                    1        3900  已售389份
-```
-
-**`total` 是过滤前的命中数，`list` 是过滤后的。** 两者不相等，就说明有东西被藏起来了。这是判断「某关键词下有没有下架装扮」最快的信号。
-
-搜索只返回 `goods_type` 1（装扮套装）和 4（收藏集）。
-
-### 详情
-
-```bash
 python tools/garb_api.py detail 120730201
 ```
 
-拿到 `state`、`properties`（含 `sale_time_begin` / `is_hide` / `sale_quantity` / `owner_uid` / `fan_mid`）、以及 `suit_items`：
+### 速率
 
-```
-suit_items:
-   card           2 件  1690250352002 (欧皇甲鱼粉丝)
-   card_bg        1 件  1690250375001 (欧皇甲鱼)
-   emoji_package  1 件  1690194013001 (欧皇甲鱼)
-   skin           1 件  1690250690001 (欧皇甲鱼)
-   space_bg       1 件  1690250416001 (欧皇甲鱼)
-```
-
-**只要知道 item_id，下架的也能取到完整数据。** 详情接口不查上架状态。
-
-### 遍历在售目录
-
-`filtered_item_ids` 是个游标 —— 把见过的 id 传进去，返回新的 20 条：
-
-```bash
-python tools/garb_api.py walk --rounds 50
-```
-
-实测 3 轮拿到 59 个不重复 id。跑够轮数就能把在售目录走一遍，存到 `data/mall_ids.json`。这是算「下架集合」的基准。
-
-### 枚举 id 空间
-
-id 是数字且分块密集（41000–41080 这段 81 个 id 里 70 个有效）：
-
-```bash
-python tools/garb_api.py hunt --start 41000 --end 41200
-```
-
-命中率大概七成。适合补 5 位数那段老装扮。
-
-### 速率限制（重要）
-
-B站 WAF 对高频很敏感。我连续探测两百多次之后开始返回 **412 Precondition Failed**，之后要等几分钟到几小时才恢复。
-
-工具默认 1.2 秒一次，遇到 412 会指数退避（90s / 180s / 270s）并换一个 buvid 重试。别调快。
-
-### 本地索引（备选）
-
-如果只想要「我记得那个名字」，不折腾 id 空间，还是可以走本地索引 —— 从别人身上采集：
-
-```bash
-python tools/catalog.py harvest --seed 2 --max-users 500
-python tools/search.py 夏日
-```
-
-`mall.html` 顶部也有搜索框。
+B站 WAF 对高频敏感，连打两百多次会开始返回 412，要等冷却。工具默认 1.2 秒一次 + 指数退避。
 
 ---
 

@@ -19,6 +19,7 @@
 """
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -143,6 +144,67 @@ def recommend(seen_ids, ps=20):
     if d.get("code") != 0:
         return []
     return (d.get("data") or {}).get("list") or []
+
+
+# ------------------------------------------------ 我的装扮（需要 app 签名）
+
+APPKEY = "27eb53fc9058f8c3"
+APPSEC = "c2ed53a74eeefe3cf99fbd01d8c9c375"
+APP_BASE = "https://app.bilibili.com"
+
+
+def _sign(params):
+    p = dict(params)
+    p.update({"appkey": APPKEY, "ts": str(int(time.time())),
+              "build": "90102100", "mobi_app": "iphone", "platform": "ios"})
+    qs = urllib.parse.urlencode(sorted(p.items()))
+    p["sign"] = hashlib.md5((qs + APPSEC).encode()).hexdigest()
+    return p
+
+
+def app_get(path, params, retries=3):
+    qs = urllib.parse.urlencode(sorted(_sign(params).items()))
+    url = APP_BASE + path + "?" + qs
+    last = None
+    for i in range(retries):
+        try:
+            req = urllib.request.Request(url, headers=headers())
+            with urllib.request.urlopen(req, timeout=12) as r:
+                return json.loads(r.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as e:
+            last = e
+            time.sleep(2 * (i + 1) if e.code == 412 else 0.8 * (i + 1))
+        except Exception as e:
+            last = e
+            time.sleep(0.8 * (i + 1))
+    return {"code": "ERR", "message": str(last)[:80]}
+
+
+def my_garbs(vmid, ps=50, pn=1):
+    """「我的装扮」—— 已拥有的装扮列表，**包含已下架的**。
+    返回 [{garb_title, item_id, garb_id, cover, fans_number}]"""
+    import re as _re
+    d = app_get("/x/v2/space/garb/list", {"vmid": vmid, "ps": ps, "pn": pn})
+    if d.get("code") != 0:
+        return [], d
+    data = d.get("data") or {}
+    out = []
+    for x in (data.get("list") or []):
+        uri = ((x.get("button") or {}).get("uri") or "")
+        m = _re.search(r"[?&]id=(\d+)", uri)
+        imgs = x.get("images") or []
+        cover = ""
+        if imgs and isinstance(imgs[0], dict):
+            cover = imgs[0].get("large_image") or imgs[0].get("small_image") or ""
+        out.append({
+            "garb_title": x.get("garb_title") or "",
+            "item_id": int(m.group(1)) if m else None,
+            "garb_id": x.get("garb_id"),
+            "cover": cover,
+            "fans_number": x.get("fans_number") or "",
+            "images": [i.get("large_image") for i in imgs if isinstance(i, dict)],
+        })
+    return out, d
 
 
 # ---------------------------------------------------------------- 输出
