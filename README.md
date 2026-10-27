@@ -18,6 +18,9 @@
 ```
 Surge/bili-garb-mall.sgmodule   模块本体（装这个）
 Surge/garb_mall_inject.js       注入脚本，运行时自识别列表结构
+Surge/bili-capture.sgmodule     抓包模块（可选）
+Surge/capture_record.js         抓包记录
+Surge/capture_view.js           抓包面板
 Surge/catalog.json              下架装扮库
 mall.html                       本地索引浏览器，带中文名搜索框
 tools/catalog.py                采集 / 校验 / 快照 / 建库 / 滚雪球
@@ -126,6 +129,68 @@ python -m http.server 8000
 1. **加大采集**：`--max-users` 拉到几千，或换不同圈子的种子用户（不同分区的人穿不同装扮）
 2. **主站搜**：B站 搜「装扮名 + 装扮」，看开箱视频/动态，分享链接里带 `item_id`
 3. **抓商城**：Surge 开着，进装扮商城随便翻，`capture` 模式下响应会存下来，里面的 `item_id` + `name` 也能入库
+
+---
+
+## 抓包
+
+配套的抓包模块，用来确认商城到底调了哪些接口（比如搜索有没有 `status` 参数）。
+
+**装**：
+
+```
+https://raw.githubusercontent.com/Suk1u/1/main/Surge/bili-capture.sgmodule
+```
+
+**看**：Safari 打开
+
+```
+https://api.bilibili.com/__bili_capture
+```
+
+Surge 会把请求短路掉，直接返回本地面板，不会真的打到服务器。
+
+### 面板里有什么
+
+| 列 | 含义 |
+|---|---|
+| 方法 / 状态码 / 时间 | 基本元信息 |
+| 大小 | 响应体字节数 |
+| 路径 | 去掉 query 的 URL |
+| `列表 /data/list ×20` | **自动识别出来的列表数组**，路径和长度 |
+| `keys:` | 响应 JSON 的顶层字段 |
+| 预览 | 前 2KB body |
+
+点一行展开看完整 URL 和预览。搜索类、商城类的条目会高亮。
+
+底部两个按钮：`JSON` 拿原始数据、`清空` 重置缓冲。
+
+### 默认只抓装扮相关
+
+`only` 参数默认是 `garb|suit|mall|search|vas|digital|collect|space`，避免被心跳、埋点刷屏。
+
+想抓全部就把 `argument` 里的 `only=` 删掉：
+
+```
+argument=cap=100
+```
+
+其他参数：
+
+| 键 | 默认 | 说明 |
+|---|---|---|
+| `cap` | 60 | 缓冲条数 |
+| `full` | 0 | 存完整 body（默认只存 2KB 预览） |
+| `only` | 见上 | URL 正则，命中才记 |
+
+### 用它找商城搜索接口
+
+1. 装上模块，MITM 开着
+2. App 里进装扮商城，用搜索框搜一个词
+3. Safari 打开面板，筛 `search`
+4. 看那条请求的 URL 和 `keys`
+
+如果搜索接口的响应里有 `sale_status` 之类的字段，说明**下架条目可能也能被搜出来** —— 那就比建本地索引省事多了。
 
 ---
 

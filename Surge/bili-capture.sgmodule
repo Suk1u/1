@@ -1,0 +1,12 @@
+#!name=哔哩哔哩 · 抓包
+#!desc=把命中的请求响应记进 Surge 本地缓冲，访问 https://api.bilibili.com/__bili_capture 查看。默认只盯装扮/商城/收藏集，改 argument 里的 only 可以放宽。
+#!system=ios
+#!author=Suk1u
+#!homepage=https://github.com/Suk1u/1
+
+[Script]
+bili-capture-view = type=http-request,pattern=^https:\/\/api\.bilibili\.com\/__bili_capture,script-path=https://raw.githubusercontent.com/Suk1u/1/main/Surge/capture_view.js
+bili-capture-record = type=http-response,pattern=^https?:\/\/(api|app)\.bilibili\.com\/,requires-body=1,max-size=262144,script-path=https://raw.githubusercontent.com/Suk1u/1/main/Surge/capture_record.js,argument=cap=60&only=garb%7Csuit%7Cmall%7Csearch%7Cvas%7Cdigital%7Ccollect%7Cspace
+
+[MITM]
+hostname = %APPEND% api.bilibili.com, app.bilibili.com
