@@ -28,11 +28,13 @@ tools/garb_api.py               接口客户端（商城搜索 / 详情 / 我的
 tools/index_build.py            索引构建 + 导出
 tools/find.py                   按中文名搜，标注在售/下架
 tools/themes.py                 提取装扮里的主题部件
+tools/collections.py            采集收藏集（含下架）
 
 data/garb_index.json            名字索引（主数据）
 data/mall_ids.json              在售目录
 data/seed_vmids.txt             采集种子（装扮收藏大户）
 data/themes.json                主题部件（配色 + 包地址）
+data/collections.json           收藏集 / 合集 / 装扮 大厅条目
 ```
 
 ---
@@ -235,6 +237,65 @@ ver                  1622174043
 ### 下架套装的主题还在吗
 
 在。主题是套装的子件，走同一个 `suit/detail`，不查上架状态。BML2021 这套已经下架，主题 5224 照样能查、包照样能下。
+
+---
+
+## 收藏集
+
+**能拿，但只到「收藏集」这一层。**
+
+收藏集大厅是公开的：
+
+```
+GET /x/garb/right/collection/aggregation_info?vmid=X
+```
+
+匿名可调，返回混装三类：
+
+| biz_type | 含义 | biz_id 是 | item_id 是 |
+|---|---|---|---|
+| 1 | 装扮 | item_id | 形象 id |
+| 2 | 收藏集 | **act_id** | **card_type_id** |
+| 3 | 合集 | 合集 id | 字符串 id |
+
+每条还带 `title.title`（名称）、`extra.owned`/`total`（持有/总数）、`detail_jump_url`、`item.extra.unusable_reason`（权益失效原因）。
+
+**包含已下架的** —— 实测 vmid=2 的 10 条里有已下架装扮，收藏集也一样。
+
+```bash
+python tools/collections.py collect --vmids 2,524387426,7420522
+python tools/collections.py list
+python tools/collections.py list --type 2      # 只看收藏集
+```
+
+```
+类型     biz_id     card_type_id     名称                     持有
+--------------------------------------------------------------------
+收藏集    108760     1754382100001    永雏塔菲叮咚集                7/9
+收藏集    107827     1748424094009    明前奶绿·童话梦境              7/8
+收藏集    106950     1762244847002    凸变英雄X                  1/31
+收藏集    106917     1743418082017    rurudo箱庭少女之梦           14/16
+收藏集    103874     1727081954034    幻星乐园                   29/53
+```
+
+### 限制：每用户只出 10 条
+
+`ps` 被服务端忽略（永远 10），翻页游标 `last_id`/`last_type`/`pn`/`offset`/`page` 全试过，**都不推进**。`simple_list` 返回 `total=21` 但 `list` 恒空，大概要登录态。
+
+所以策略和多用户采集一样：**多喂 vmid，每个贡献 10 条**。工具会在总数大于 10 时打警告。
+
+### 单卡明细还没打通
+
+`x/vas/dlc_act/act/card/detail?act_id=&card_type_id=` 返回空。
+`x/garb/digital/card/detail?vmid=&card_id=&use_scene=1` 能通（code=0），schema 是：
+
+```
+card_type_id  card_id  card_type  card_status  card_name
+card_no  card_cnt  card_img  video_list  holding_rate  card_scarcity
+horizontal_card_light_url / vertical_card_light_url ...
+```
+
+但 `card_id` 传 `card_type_id` 拿到的全是 0，参数语义还没对上。**要往下挖得先抓一次收藏集详情页。**
 
 ---
 
