@@ -168,6 +168,67 @@ def cmd_users(a):
     print("\n访问 %d 个用户，索引共 %d 条" % (seen, len(ix["items"])))
 
 
+# ----------------------------------------------------------------- rank
+
+def cmd_rank(a):
+    """扫一批 vmid，按「拥有装扮数量」排序，找收藏大户"""
+    cands = [int(x) for x in a.vmids.replace("\n", ",").split(",") if x.strip().isdigit()]
+
+    # 从装扮的 owner_uid 反推候选：做装扮的 UP 主自己通常收藏最多
+    if a.from_owners:
+        ids = []
+        if os.path.exists(SEEDS):
+            with open(SEEDS, encoding="utf-8") as f:
+                ids = json.load(f).get("ids", [])
+        sample = ids[:a.owner_sample] if ids else []
+        print("从 %d 个在售装扮取 owner_uid..." % len(sample))
+        for iid in sample:
+            x, _ = garb_api.detail(iid)
+            if x:
+                uid = (x.get("properties") or {}).get("owner_uid")
+                if uid and str(uid).isdigit():
+                    u = int(uid)
+                    if u not in cands:
+                        cands.append(u)
+            time.sleep(a.sleep)
+        print("  得到 %d 个候选 owner" % len(cands))
+
+    if a.from_following:
+        for seed in [int(x) for x in a.from_following.split(",") if x.strip().isdigit()]:
+            try:
+                r = garb_api.get("/x/relation/followings",
+                                 {"vmid": seed, "pn": 1, "ps": 50})
+                for u in ((r or {}).get("data") or {}).get("list") or []:
+                    m = u.get("mid")
+                    if m and m not in cands:
+                        cands.append(m)
+            except Exception as e:
+                print("  取关注失败 %s: %s" % (seed, e))
+            time.sleep(a.sleep)
+
+    cands = cands[:a.limit]
+    print("候选 %d 个，开始扫..." % len(cands))
+    rows = []
+    for n, vmid in enumerate(cands, 1):
+        lst, raw = garb_api.my_garbs(vmid, ps=50, pn=1)
+        if raw.get("code") != 0:
+            time.sleep(a.sleep)
+            continue
+        rows.append((len(lst), vmid, [x["garb_title"] for x in lst[:2]]))
+        if n % 20 == 0:
+            print("  [%d/%d] 当前最高 %d 套" % (n, len(cands), max(r[0] for r in rows) if rows else 0))
+        time.sleep(a.sleep)
+
+    rows.sort(reverse=True)
+    print("\n%-10s %-6s %s" % ("vmid", "套数", "样例"))
+    print("-" * 60)
+    for cnt, vmid, sample in rows[:a.top]:
+        print("%-10s %-6d %s" % (vmid, cnt, " / ".join(str(s)[:18] for s in sample)))
+    if rows:
+        top = ",".join(str(v) for cnt, v, _s in rows[:10] if cnt > 0)
+        print("\n前十 vmid: %s" % top)
+
+
 # ---------------------------------------------------------------- seeds
 
 def cmd_walk_seeds(a):
@@ -272,6 +333,16 @@ def cmd_stats(a):
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    rk = sub.add_parser("rank")
+    rk.add_argument("--vmids", default="", help="候选 vmid，逗号分隔")
+    rk.add_argument("--from-following", default="", help="从这些人的关注里取候选（需登录态）")
+    rk.add_argument("--from-owners", action="store_true", help="从在售装扮的 owner_uid 取候选")
+    rk.add_argument("--owner-sample", type=int, default=40)
+    rk.add_argument("--limit", type=int, default=80)
+    rk.add_argument("--top", type=int, default=15)
+    rk.add_argument("--sleep", type=float, default=1.0)
+    rk.set_defaults(func=cmd_rank)
 
     u = sub.add_parser("users")
     u.add_argument("--vmids", required=True, help="起始 vmid，逗号分隔")

@@ -36,11 +36,12 @@ jobs:
           python tools/index_build.py walk-seeds \
             --rounds ${{ github.event.inputs.rounds || 30 }} --sleep 1.2
 
-      - name: 探邻居建索引
+      - name: 从「我的装扮」采集
         continue-on-error: true
         run: |
-          python tools/index_build.py users --vmids 2,946974,3797584 --expand 300 \
-            --budget ${{ github.event.inputs.budget || 1500 }} --sleep 1.2
+          SEEDS=$(paste -sd, data/seed_vmids.txt)
+          echo "种子: $SEEDS"
+          python tools/index_build.py users --vmids "$SEEDS" --no-follow --expand 40 --sleep 1.2
 
       - name: 统计
         run: python tools/index_build.py stats
